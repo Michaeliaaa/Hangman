@@ -1,84 +1,96 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Header from './components/Header';
 import Figure from './components/Figure';
 import WrongLetters from './components/WrongLetters';
 import Word from './components/Word';
 import Popup from './components/Popup';
 import Notification from './components/Notification';
-import { showNotification as show } from './helpers/helpers';
 
 import './App.css';
-
-const words = ['application', 'programming', 'interface', 'wizard'];
-let selectedWord = words[Math.floor(Math.random() * words.length)];
+import Game, { GameResponse, GameStatus } from './helpers/Game';
 
 function App() {
-  const [playable, setPlayable] = useState(true);
-  const [correctLetters, setCorrectLetters] = useState([]);
-  const [wrongLetters, setWrongLetters] = useState([]);
   const [showNotification, setShowNotification] = useState(false);
 
+  const game = useMemo(() => new Game(9), [])
+  const [gameState, setGameState] = useState(game);
+  const updateGameState = useCallback(() => {
+    setGameState({
+      chances: game.chances,
+      answer: game.answer,
+      answerCharacters: game.answerCharacters,
+      wrongLetters: game.wrongLetters,
+      correctLetters: game.correctLetters,
+      status: game.status,
+      winCount: game.winCount,
+      loseCount: game.loseCount,
+      userResponse: game.userResponse,
+      playable: game.playable()
+    })
+  }, [game])
+  const resetGame = useCallback(async () => {
+    await game.resetGame();
+    updateGameState();
+  }, [game, updateGameState]);
+
+  useEffect(
+    () => { resetGame() },
+    [resetGame]
+  )
   useEffect(() => {
     const handleKeydown = event => {
-      const { key, keyCode } = event;
-      if (playable && keyCode >= 65 && keyCode <= 90) {
-        const letter = key.toLowerCase();
-        if (selectedWord.includes(letter)) {
-          if (!correctLetters.includes(letter)) {
-            setCorrectLetters(currentLetters => [...currentLetters, letter]);
-          } else {
-            show(setShowNotification);
-          }
-        } else {
-          if (!wrongLetters.includes(letter)) {
-            setWrongLetters(currentLetters => [...currentLetters, letter]);
-          } else {
-            show(setShowNotification);
-          }
-        }
+      const { key } = event;
+      if (!game.playable() && key === "Enter") {
+        resetGame();
+        return
+      } else if (key.length !== 1) {
+        return;
+      }
+      const response = game.handleKeydown(key);
+      updateGameState();
+      switch (response) {
+        case GameResponse.INVALID_CHARACTER:
+          setShowNotification(true)
+          break;
+        case GameResponse.WIN:
+          break;
+        case GameResponse.GAME_OVER:
+          break;
+        case GameResponse.INVALID:
+        default:
+          break;
       }
     }
     window.addEventListener('keydown', handleKeydown);
-
     return () => window.removeEventListener('keydown', handleKeydown);
-  }, [correctLetters, wrongLetters, playable]);
+  }, [game, updateGameState, resetGame, setShowNotification, showNotification])
 
-  function playAgain() {
-    setPlayable(true);
+  const DelayPopup = () => {
+    const [show, setShow] = React.useState(false)
 
-    // Empty Arrays
-    setCorrectLetters([]);
-    setWrongLetters([]);
+    React.useEffect(() => {
+      const timeout = setTimeout(() => {
+        setShow(true)
+      }, 300)
+      return () => clearTimeout(timeout)
+    }, [show])
 
-    const random = Math.floor(Math.random() * words.length);
-    selectedWord = words[random];
+    return <Popup gameState={gameState} playAgain={async () => {
+      resetGame();
+    }} />
   }
-
-const DelayPopup = () => {
-  const [show, setShow] = React.useState(false)
-
-  React.useEffect(() => {
-    const timeout = setTimeout(() => {
-      setShow(true)
-    }, 300)
-    return () => clearTimeout(timeout)
-  }, [show])
-
-  if (show) {
-    return <Popup correctLetters={correctLetters} wrongLetters={wrongLetters} selectedWord={selectedWord} setPlayable={setPlayable} playAgain={playAgain} />
-  }
-}
-
   return (
     <>
-      <Header />
+      <Header winCount={gameState.winCount} loseCount={gameState.loseCount} />
       <div className="game-container">
-        <Figure wrongLetters={wrongLetters} />
-        <WrongLetters wrongLetters={wrongLetters} />
-        <Word selectedWord={selectedWord} correctLetters={correctLetters} />
+        <div id="display">
+          <Figure wrongAttempts={gameState.wrongLetters.length} />
+          <WrongLetters wrongLetters={gameState.wrongLetters} />
+        </div>
+        <Word selectedWord={gameState.answer} correctLetters={gameState.correctLetters} />
       </div>
-      <DelayPopup/>
-      <Notification showNotification={showNotification} />
+      {showNotification && (<Notification hide={() => setShowNotification(false)} />)}
+      {(gameState.status !== GameStatus.LOADED) && (<DelayPopup />)}
     </>
   );
 }
